@@ -4,6 +4,7 @@ use axum::{
     extract::Multipart,
     http::StatusCode,
 };
+use sqlx::PgPool;
 use tokio::net::TcpListener;
 use uuid::Uuid;
 
@@ -11,6 +12,15 @@ const UPLOAD_DIR: &str = "./uploads";
 
 #[tokio::main]
 async fn main() {
+    dotenvy::dotenv().ok();
+
+    let database_url = std::env::var("DATABASE_URL")
+        .expect("DATABASE_URL must be set in .env");
+
+    let pool = PgPool::connect(&database_url)
+        .await
+        .expect("Failed to connect to database");
+
     tokio::fs::create_dir_all(UPLOAD_DIR).await.unwrap();
 
     let app = Router::new()
