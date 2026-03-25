@@ -2,12 +2,16 @@ use axum::{
     Router,
     routing::{get, post},
     extract::{FromRef, Multipart, Path, State},
-    http::{StatusCode, header},
+    http::header,
     response::IntoResponse,
 };
 use sqlx::PgPool;
 use tokio::net::TcpListener;
 use uuid::Uuid;
+
+use crate::error::AppError;
+
+mod error;
 
 const UPLOAD_DIR: &str = "./uploads";
 
@@ -49,11 +53,11 @@ async fn main() {
 async fn upload_file(
     State(pool): State<PgPool>,
     mut multipart: Multipart,
-) -> Result<String, StatusCode> {
+) -> Result<String, AppError> {
     while let Some(field) = multipart
         .next_field()
         .await
-        .map_err(|_| StatusCode::BAD_REQUEST)?
+        .map_err(|_| AppError::BadRequest)?
     {
         let name = field.name().unwrap_or("").to_string();
         if name != "file" {
@@ -62,14 +66,14 @@ async fn upload_file(
 
         let file_name = field.file_name().unwrap_or("unknown").to_string();
 
-        let data = field.bytes().await.map_err(|_| StatusCode::BAD_REQUEST)?;
+        let data = field.bytes().await.map_err(|_| AppError::BadRequest)?;
         let size = data.len() as i64;
         let id = Uuid::new_v4();
         let save_path = format!("{}/{}", UPLOAD_DIR, id);
 
         tokio::fs::write(&save_path, &data)
             .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(|_| AppError::InternalError)?;
 
         sqlx::query!(
             "INSERT INTO files (id, original_name, size_bytes) VALUES ($1, $2, $3)",
@@ -78,34 +82,32 @@ async fn upload_file(
             size,
         )
         .execute(&pool)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .await?;
 
         println!("Saved '{}' as '{}'", file_name, id);
 
         return Ok(format!("File ID: {}", id));
     }
 
-    Err(StatusCode::BAD_REQUEST)
+    Err(AppError::BadRequest)
 }
 
 async fn download_file(
     State(pool): State<PgPool>,
     Path(id): Path<Uuid>,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> Result<impl IntoResponse, AppError> {
     let record = sqlx::query!(
         "SELECT original_name FROM files WHERE id = $1",
         id
     )
     .fetch_optional(&pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .ok_or(StatusCode::NOT_FOUND)?;
+    .await?
+    .ok_or_else(|| AppError::NotFound(id.to_string()))?;
 
     let file_path = format!("{}/{}", UPLOAD_DIR, id);
     let data = tokio::fs::read(&file_path)
         .await
-        .map_err(|_| StatusCode::NOT_FOUND)?;
+        .map_err(|_| AppError::NotFound(id.to_string()))?;
 
     let headers = [
         (
