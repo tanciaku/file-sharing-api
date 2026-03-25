@@ -1,5 +1,9 @@
 use axum::{
-    Router, extract::{FromRef, Multipart, State}, http::StatusCode, routing::{get, post}
+    Router,
+    routing::{get, post},
+    extract::{FromRef, Multipart, Path, State},
+    http::{StatusCode, header},
+    response::IntoResponse,
 };
 use sqlx::PgPool;
 use tokio::net::TcpListener;
@@ -22,8 +26,7 @@ impl FromRef<AppState> for PgPool {
 async fn main() {
     dotenvy::dotenv().ok();
 
-    let database_url = std::env::var("DATABASE_URL")
-        .expect("DATABASE_URL must be set in .env");
+    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set in .env");
 
     let pool = PgPool::connect(&database_url)
         .await
@@ -45,17 +48,19 @@ async fn main() {
 
 async fn upload_file(
     State(pool): State<PgPool>,
-    mut multipart: Multipart
+    mut multipart: Multipart,
 ) -> Result<String, StatusCode> {
-    while let Some(field) = multipart.next_field().await.map_err(|_| StatusCode::BAD_REQUEST)? {
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|_| StatusCode::BAD_REQUEST)?
+    {
         let name = field.name().unwrap_or("").to_string();
         if name != "file" {
             continue;
         }
 
-        let file_name = field.file_name()
-            .unwrap_or("unknown")
-            .to_string();
+        let file_name = field.file_name().unwrap_or("unknown").to_string();
 
         let data = field.bytes().await.map_err(|_| StatusCode::BAD_REQUEST)?;
         let size = data.len() as i64;
@@ -84,6 +89,34 @@ async fn upload_file(
     Err(StatusCode::BAD_REQUEST)
 }
 
-async fn download_file() -> &'static str {
-    "Download endpoint - TODO"
+async fn download_file(
+    State(pool): State<PgPool>,
+    Path(id): Path<Uuid>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let record = sqlx::query!(
+        "SELECT original_name FROM files WHERE id = $1",
+        id
+    )
+    .fetch_optional(&pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    let file_path = format!("{}/{}", UPLOAD_DIR, id);
+    let data = tokio::fs::read(&file_path)
+        .await
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+
+    let headers = [
+        (
+            header::CONTENT_TYPE,
+            "application/octet-stream".to_string(),
+        ),
+        (
+            header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"{}\"", record.original_name),
+        ),
+    ];
+
+    Ok((headers, data))
 }
