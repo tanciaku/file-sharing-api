@@ -1,14 +1,22 @@
 use axum::{
-    Router,
-    routing::{get, post},
-    extract::Multipart,
-    http::StatusCode,
+    Router, extract::{FromRef, Multipart, State}, http::StatusCode, routing::{get, post}
 };
 use sqlx::PgPool;
 use tokio::net::TcpListener;
 use uuid::Uuid;
 
 const UPLOAD_DIR: &str = "./uploads";
+
+#[derive(Clone)]
+struct AppState {
+    pool: PgPool,
+}
+
+impl FromRef<AppState> for PgPool {
+    fn from_ref(state: &AppState) -> Self {
+        state.pool.clone()
+    }
+}
 
 #[tokio::main]
 async fn main() {
@@ -23,16 +31,22 @@ async fn main() {
 
     tokio::fs::create_dir_all(UPLOAD_DIR).await.unwrap();
 
+    let state = AppState { pool };
+
     let app = Router::new()
         .route("/upload", post(upload_file))
-        .route("/files/{id}", get(download_file));
+        .route("/files/{id}", get(download_file))
+        .with_state(state);
 
     let listener = TcpListener::bind("0.0.0.0:3000").await.unwrap();
     println!("Listening on port 3000");
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn upload_file(mut multipart: Multipart) -> Result<String, StatusCode> {
+async fn upload_file(
+    State(pool): State<PgPool>,
+    mut multipart: Multipart
+) -> Result<String, StatusCode> {
     while let Some(field) = multipart.next_field().await.map_err(|_| StatusCode::BAD_REQUEST)? {
         let name = field.name().unwrap_or("").to_string();
         if name != "file" {
@@ -44,14 +58,23 @@ async fn upload_file(mut multipart: Multipart) -> Result<String, StatusCode> {
             .to_string();
 
         let data = field.bytes().await.map_err(|_| StatusCode::BAD_REQUEST)?;
-
-        let id = Uuid::new_v4().to_string();
-
+        let size = data.len() as i64;
+        let id = Uuid::new_v4();
         let save_path = format!("{}/{}", UPLOAD_DIR, id);
 
         tokio::fs::write(&save_path, &data)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        sqlx::query!(
+            "INSERT INTO files (id, original_name, size_bytes) VALUES ($1, $2, $3)",
+            id,
+            file_name,
+            size,
+        )
+        .execute(&pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
         println!("Saved '{}' as '{}'", file_name, id);
 
