@@ -6,7 +6,7 @@ pub enum AppError {
     BadRequest,
     //Conflict(String),
     InternalError,
-    //Unauthorized,
+    Unauthorized,
     //Forbidden,
 }
 
@@ -34,9 +34,9 @@ impl IntoResponse for AppError {
                 "Something went wrong".to_string(),
             )
                 .into_response(),
-            //AppError::Unauthorized => {
-            //    (StatusCode::UNAUTHORIZED, "Invalid credentials".to_string()).into_response()
-            //}
+            AppError::Unauthorized => {
+                (StatusCode::UNAUTHORIZED, "Invalid credentials".to_string()).into_response()
+            }
             //AppError::Forbidden => (
             //    StatusCode::FORBIDDEN,
             //    "You do not have permission to perform this action".to_string(),

@@ -12,12 +12,14 @@ use uuid::Uuid;
 use crate::error::AppError;
 
 mod error;
+mod auth;
 
 const UPLOAD_DIR: &str = "./uploads";
 
 #[derive(Clone)]
 struct AppState {
     pool: PgPool,
+    jwt_secret: String,
 }
 
 impl FromRef<AppState> for PgPool {
@@ -31,6 +33,7 @@ async fn main() {
     dotenvy::dotenv().ok();
 
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set in .env");
+    let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set in .env");
 
     let pool = PgPool::connect(&database_url)
         .await
@@ -38,11 +41,12 @@ async fn main() {
 
     tokio::fs::create_dir_all(UPLOAD_DIR).await.unwrap();
 
-    let state = AppState { pool };
+    let state = AppState { pool, jwt_secret };
 
     let app = Router::new()
         .route("/upload", post(upload_file))
         .route("/files/{id}", get(download_file))
+        .route("/auth/login", post(auth::login))
         .with_state(state);
 
     let listener = TcpListener::bind("0.0.0.0:3000").await.unwrap();
