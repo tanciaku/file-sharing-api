@@ -1,14 +1,14 @@
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use axum::{
+    Json,
     extract::{FromRequestParts, State},
     http::request::Parts,
-    Json
 };
 use chrono::{Duration, Utc};
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use serde::{Deserialize, Serialize};
 
-use crate::{error::AppError, AppState};
+use crate::{AppState, error::AppError};
 
 #[derive(Deserialize)]
 pub struct LoginRequest {
@@ -33,7 +33,10 @@ pub struct AuthUser(pub Claims);
 impl FromRequestParts<AppState> for AuthUser {
     type Rejection = AppError;
 
-    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
         let auth_header = parts
             .headers
             .get("Authorization")
@@ -67,8 +70,8 @@ pub async fn login(
     .await?
     .ok_or(AppError::Unauthorized)?;
 
-    let parsed_hash = PasswordHash::new(&user.password_hash)
-        .map_err(|_| AppError::InternalError)?;
+    let parsed_hash =
+        PasswordHash::new(&user.password_hash).map_err(|_| AppError::InternalError)?;
 
     Argon2::default()
         .verify_password(payload.password.as_bytes(), &parsed_hash)

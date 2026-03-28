@@ -7,7 +7,7 @@ pub enum AppError {
     //Conflict(String),
     InternalError,
     Unauthorized,
-    //Forbidden,
+    Forbidden,
 }
 
 impl IntoResponse for AppError {
@@ -15,19 +15,13 @@ impl IntoResponse for AppError {
         match self {
             AppError::Database => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "An internal error occurred".to_string()
+                "An internal error occurred".to_string(),
             )
                 .into_response(),
-            AppError::NotFound(id) => (
-                StatusCode::NOT_FOUND,
-                format!("Not found: {}", id),
-            )
-                .into_response(),
-            AppError::BadRequest => (
-                StatusCode::BAD_REQUEST,
-                "...".to_string(),
-            )
-                .into_response(),
+            AppError::NotFound(id) => {
+                (StatusCode::NOT_FOUND, format!("Not found: {}", id)).into_response()
+            }
+            AppError::BadRequest => (StatusCode::BAD_REQUEST, "...".to_string()).into_response(),
             //AppError::Conflict(msg) => (StatusCode::CONFLICT, msg).into_response(),
             AppError::InternalError => (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -37,11 +31,11 @@ impl IntoResponse for AppError {
             AppError::Unauthorized => {
                 (StatusCode::UNAUTHORIZED, "Invalid credentials".to_string()).into_response()
             }
-            //AppError::Forbidden => (
-            //    StatusCode::FORBIDDEN,
-            //    "You do not have permission to perform this action".to_string(),
-            //)
-            //    .into_response(),
+            AppError::Forbidden => (
+                StatusCode::FORBIDDEN,
+                "You do not have permission to perform this action".to_string(),
+            )
+                .into_response(),
         }
     }
 }

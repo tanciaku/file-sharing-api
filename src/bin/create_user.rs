@@ -1,6 +1,5 @@
 use argon2::{
-    Argon2,
-    PasswordHasher,
+    Argon2, PasswordHasher,
     password_hash::{SaltString, rand_core::OsRng},
 };
 use sqlx::PgPool;
@@ -19,8 +18,7 @@ async fn main() {
 
     dotenvy::dotenv().ok();
 
-    let database_url = std::env::var("DATABASE_URL")
-        .expect("DATABASE_URL must be set in .env");
+    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set in .env");
 
     let pool = PgPool::connect(&database_url)
         .await
