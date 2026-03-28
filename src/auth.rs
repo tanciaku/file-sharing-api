@@ -1,7 +1,11 @@
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
-use axum::{extract::State, Json};
+use axum::{
+    extract::{FromRequestParts, State},
+    http::request::Parts,
+    Json
+};
 use chrono::{Duration, Utc};
-use jsonwebtoken::{encode, EncodingKey, Header};
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 
 use crate::{error::AppError, AppState};
@@ -20,7 +24,35 @@ pub struct LoginResponse {
 #[derive(Serialize, Deserialize)]
 pub struct Claims {
     pub sub: String,
+    pub user_id: i64,
     pub exp: usize,
+}
+
+pub struct AuthUser(pub Claims);
+
+impl FromRequestParts<AppState> for AuthUser {
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
+        let auth_header = parts
+            .headers
+            .get("Authorization")
+            .and_then(|v| v.to_str().ok())
+            .ok_or(AppError::Unauthorized)?;
+
+        let token = auth_header
+            .strip_prefix("Bearer ")
+            .ok_or(AppError::Unauthorized)?;
+
+        let token_data = decode::<Claims>(
+            token,
+            &DecodingKey::from_secret(state.jwt_secret.as_bytes()),
+            &Validation::default(),
+        )
+        .map_err(|_| AppError::Unauthorized)?;
+
+        Ok(AuthUser(token_data.claims))
+    }
 }
 
 pub async fn login(
@@ -28,7 +60,7 @@ pub async fn login(
     Json(payload): Json<LoginRequest>,
 ) -> Result<Json<LoginResponse>, AppError> {
     let user = sqlx::query!(
-        "SELECT password_hash FROM users WHERE username = $1",
+        "SELECT id, password_hash FROM users WHERE username = $1",
         payload.username
     )
     .fetch_optional(&state.pool)
@@ -49,6 +81,7 @@ pub async fn login(
 
     let claims = Claims {
         sub: payload.username,
+        user_id: user.id,
         exp,
     };
 

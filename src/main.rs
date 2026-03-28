@@ -9,7 +9,7 @@ use sqlx::PgPool;
 use tokio::net::TcpListener;
 use uuid::Uuid;
 
-use crate::error::AppError;
+use crate::{auth::AuthUser, error::AppError};
 
 mod error;
 mod auth;
@@ -56,8 +56,10 @@ async fn main() {
 
 async fn upload_file(
     State(pool): State<PgPool>,
+    auth: AuthUser,
     mut multipart: Multipart,
 ) -> Result<String, AppError> {
+    let user_id = auth.0.user_id;
     while let Some(field) = multipart
         .next_field()
         .await
@@ -80,10 +82,11 @@ async fn upload_file(
             .map_err(|_| AppError::InternalError)?;
 
         sqlx::query!(
-            "INSERT INTO files (id, original_name, size_bytes) VALUES ($1, $2, $3)",
+            "INSERT INTO files (id, original_name, size_bytes, user_id) VALUES ($1, $2, $3, $4)",
             id,
             file_name,
             size,
+            user_id,
         )
         .execute(&pool)
         .await?;

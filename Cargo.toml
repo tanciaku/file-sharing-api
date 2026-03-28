@@ -2,6 +2,7 @@
 name = "file-sharing-api"
 version = "0.1.0"
 edition = "2024"
+default-run = "file-sharing-api"
 
 [dependencies]
 axum = { version = "0.8.8", features = ["multipart"] }
@@ -15,4 +16,4 @@ sqlx = { version = "0.8.6", features = ["runtime-tokio", "postgres", "uuid", "ch
 dotenvy = "0.15.7"
 chrono = { version = "0.4.44", features = ["serde"] }
 argon2 = "0.5.3"
-jsonwebtoken = "10.3.0"
+jsonwebtoken = { version = "10.3.0", features = ["rust_crypto"] }
