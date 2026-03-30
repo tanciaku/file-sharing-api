@@ -13,13 +13,15 @@ use crate::{auth::AuthUser, error::AppError};
 
 mod auth;
 mod error;
+#[cfg(test)]
+mod tests;
 
 const UPLOAD_DIR: &str = "./uploads";
 
 #[derive(Clone)]
-struct AppState {
-    pool: PgPool,
-    jwt_secret: String,
+pub struct AppState {
+    pub pool: PgPool,
+    pub jwt_secret: String,
 }
 
 impl FromRef<AppState> for PgPool {
@@ -43,15 +45,19 @@ async fn main() {
 
     let state = AppState { pool, jwt_secret };
 
-    let app = Router::new()
-        .route("/upload", post(upload_file))
-        .route("/files/{id}", get(download_file).delete(delete_file))
-        .route("/auth/login", post(auth::login))
-        .with_state(state);
+    let app = create_app(state);
 
     let listener = TcpListener::bind("0.0.0.0:3000").await.unwrap();
     println!("Listening on port 3000");
     axum::serve(listener, app).await.unwrap();
+}
+
+pub fn create_app(state: AppState) -> Router {
+    Router::new()
+        .route("/upload", post(upload_file))
+        .route("/files/{id}", get(download_file).delete(delete_file))
+        .route("/auth/login", post(auth::login))
+        .with_state(state)
 }
 
 async fn upload_file(
