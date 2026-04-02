@@ -72,6 +72,7 @@ async fn main() {
     let pool = PgPool::connect(&database_url)
         .await
         .expect("Failed to connect to database");
+    sqlx::migrate!("./migrations").run(&pool).await.unwrap();
 
     tokio::fs::create_dir_all(UPLOAD_DIR).await.unwrap();
 
