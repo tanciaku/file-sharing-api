@@ -1,5 +1,5 @@
 use axum::{
-    Json, Router, extract::{FromRef, Multipart, Path, Query, State}, http::{StatusCode, header}, response::IntoResponse, routing::{get, post}
+    Json, Router, extract::{DefaultBodyLimit, FromRef, Multipart, Path, Query, State}, http::{StatusCode, header}, response::IntoResponse, routing::{get, post}
 };
 use sqlx::PgPool;
 use tokio::net::TcpListener;
@@ -15,6 +15,18 @@ mod error;
 mod tests;
 
 const UPLOAD_DIR: &str = "./uploads";
+const MAX_FILE_SIZE: usize = 10 * 1024 * 1024; // 10 MB
+
+const ALLOWED_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "pdf", "txt"];
+
+const ALLOWED_MIME_TYPES: &[&str] = &[
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "application/pdf",
+    "text/plain",
+];
 
 #[derive(Clone)]
 pub struct AppState {
@@ -78,6 +90,7 @@ pub fn create_app(state: AppState) -> Router {
         .route("/files", get(list_files))
         .route("/files/{id}", get(download_file).delete(delete_file))
         .route("/auth/login", post(auth::login))
+        .layer(DefaultBodyLimit::disable())
         .with_state(state)
 }
 
@@ -99,7 +112,27 @@ async fn upload_file(
 
         let file_name = field.file_name().unwrap_or("unknown").to_string();
 
+        let ext = std::path::Path::new(&file_name)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        if !ALLOWED_EXTENSIONS.contains(&ext.as_str()) {
+            return Err(AppError::UnsupportedMediaType);
+        }
+        
+        let content_type = field.content_type().unwrap_or("").to_string();
+        if !ALLOWED_MIME_TYPES.contains(&content_type.as_str()) {
+            return Err(AppError::UnsupportedMediaType);
+        }
+
         let data = field.bytes().await.map_err(|_| AppError::BadRequest)?;
+
+        if data.len() > MAX_FILE_SIZE {
+            return Err(AppError::FileTooLarge);
+        }
+
         let size = data.len() as i64;
         let id = Uuid::new_v4();
         let save_path = format!("{}/{}", UPLOAD_DIR, id);

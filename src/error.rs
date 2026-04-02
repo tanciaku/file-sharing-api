@@ -8,6 +8,8 @@ pub enum AppError {
     InternalError,
     Unauthorized,
     Forbidden,
+    FileTooLarge,
+    UnsupportedMediaType,
 }
 
 impl IntoResponse for AppError {
@@ -34,6 +36,16 @@ impl IntoResponse for AppError {
             AppError::Forbidden => (
                 StatusCode::FORBIDDEN,
                 "You do not have permission to perform this action".to_string(),
+            )
+                .into_response(),
+            AppError::FileTooLarge => (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "File exceeds the maximum allowed size".to_string(),
+            )
+                .into_response(),
+            AppError::UnsupportedMediaType => (
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "File type is not allowed".to_string(),
             )
                 .into_response(),
         }

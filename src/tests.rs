@@ -82,11 +82,12 @@ async fn create_test_user(pool: &PgPool, username: &str, password: &str) -> i64 
     .id
 }
 
-fn multipart_body(boundary: &str, filename: &str, content: &str) -> String {
+fn multipart_body(boundary: &str, filename: &str, content_type: &str, content: &str) -> String {
     format!(
-        "--{b}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{f}\"\r\nContent-Type: application/octet-stream\r\n\r\n{c}\r\n--{b}--\r\n",
+        "--{b}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{f}\"\r\nContent-Type: {ct}\r\n\r\n{c}\r\n--{b}--\r\n",
         b = boundary,
         f = filename,
+        ct = content_type,
         c = content,
     )
 }
@@ -103,7 +104,7 @@ async fn upload_file_for_user(app: axum::Router, token: &str, filename: &str) ->
                     header::CONTENT_TYPE,
                     format!("multipart/form-data; boundary={}", boundary),
                 )
-                .body(Body::from(multipart_body(boundary, filename, "content")))
+                .body(Body::from(multipart_body(boundary, filename, "text/plain", "content")))
                 .unwrap(),
         )
         .await
@@ -120,6 +121,92 @@ async fn upload_file_for_user(app: axum::Router, token: &str, filename: &str) ->
 }
 
 // --- Tests ---
+
+#[tokio::test]
+async fn test_upload_rejects_disallowed_extension() {
+    tokio::fs::create_dir_all("./uploads").await.unwrap();
+    let pool = test_pool().await;
+    let alice_id = create_test_user(&pool, "alice", "password123").await;
+    let app = make_app(pool);
+    let token = make_jwt(alice_id, "alice");
+    let boundary = "TestBoundary1234";
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/upload")
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .header(
+                    header::CONTENT_TYPE,
+                    format!("multipart/form-data; boundary={}", boundary),
+                )
+                .body(Body::from(multipart_body(boundary, "malware.exe", "text/plain", "bad")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+}
+
+#[tokio::test]
+async fn test_upload_rejects_disallowed_mime_type() {
+    tokio::fs::create_dir_all("./uploads").await.unwrap();
+    let pool = test_pool().await;
+    let alice_id = create_test_user(&pool, "alice", "password123").await;
+    let app = make_app(pool);
+    let token = make_jwt(alice_id, "alice");
+    let boundary = "TestBoundary1234";
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/upload")
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .header(
+                    header::CONTENT_TYPE,
+                    format!("multipart/form-data; boundary={}", boundary),
+                )
+                .body(Body::from(multipart_body(boundary, "file.txt", "application/octet-stream", "bad")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+}
+
+#[tokio::test]
+async fn test_upload_rejects_oversized_file() {
+    tokio::fs::create_dir_all("./uploads").await.unwrap();
+    let pool = test_pool().await;
+    let alice_id = create_test_user(&pool, "alice", "password123").await;
+    let app = make_app(pool);
+    let token = make_jwt(alice_id, "alice");
+    let boundary = "TestBoundary1234";
+
+    let big_content = "a".repeat(11 * 1024 * 1024); // 11 MB
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/upload")
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .header(
+                    header::CONTENT_TYPE,
+                    format!("multipart/form-data; boundary={}", boundary),
+                )
+                .body(Body::from(multipart_body(boundary, "big.txt", "text/plain", &big_content)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}
+
 
 #[tokio::test]
 async fn test_login_success() {
@@ -197,6 +284,7 @@ async fn test_upload_and_download() {
                 .body(Body::from(multipart_body(
                     boundary,
                     "test.txt",
+                    "text/plain",
                     file_content,
                 )))
                 .unwrap(),
@@ -404,7 +492,7 @@ async fn test_delete_owner_vs_non_owner() {
                     header::CONTENT_TYPE,
                     format!("multipart/form-data; boundary={}", boundary),
                 )
-                .body(Body::from(multipart_body(boundary, "alice.txt", "hello")))
+                .body(Body::from(multipart_body(boundary, "alice.txt", "text/plain", "hello")))
                 .unwrap(),
         )
         .await
