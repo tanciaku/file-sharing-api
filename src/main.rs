@@ -1,13 +1,11 @@
 use axum::{
-    Router,
-    extract::{FromRef, Multipart, Path, State},
-    http::{StatusCode, header},
-    response::IntoResponse,
-    routing::{get, post},
+    Json, Router, extract::{FromRef, Multipart, Path, Query, State}, http::{StatusCode, header}, response::IntoResponse, routing::{get, post}
 };
 use sqlx::PgPool;
 use tokio::net::TcpListener;
 use uuid::Uuid;
+use serde::{Deserialize, Serialize};
+use chrono::{DateTime, Utc};
 
 use crate::{auth::AuthUser, error::AppError};
 
@@ -28,6 +26,28 @@ impl FromRef<AppState> for PgPool {
     fn from_ref(state: &AppState) -> Self {
         state.pool.clone()
     }
+}
+
+#[derive(Serialize)]
+pub struct FileMetadata {
+    pub id: Uuid,
+    pub original_name: String,
+    pub size_bytes: i64,
+    pub uploaded_at: DateTime<Utc>,
+}
+
+#[derive(Deserialize)]
+pub struct ListFilesParams {
+    pub page: Option<u32>,
+    pub per_page: Option<u32>,
+}
+
+#[derive(Serialize)]
+pub struct PaginatedFiles {
+    pub files: Vec<FileMetadata>,
+    pub page: u32,
+    pub per_page: u32,
+    pub total: i64,
 }
 
 #[tokio::main]
@@ -55,6 +75,7 @@ async fn main() {
 pub fn create_app(state: AppState) -> Router {
     Router::new()
         .route("/upload", post(upload_file))
+        .route("/files", get(list_files))
         .route("/files/{id}", get(download_file).delete(delete_file))
         .route("/auth/login", post(auth::login))
         .with_state(state)
@@ -160,4 +181,53 @@ async fn delete_file(
     tx.commit().await?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn list_files(
+    State(pool): State<PgPool>,
+    auth: AuthUser,
+    Query(params): Query<ListFilesParams>,
+) -> Result<Json<PaginatedFiles>, AppError> {
+    let user_id = auth.0.user_id;
+
+    let page = params.page.unwrap_or(1).max(1);
+    let per_page = params.per_page.unwrap_or(20).clamp(1, 100);
+    let offset = ((page - 1) * per_page) as i64;
+    let limit = per_page as i64;
+
+    let total = sqlx::query!("SELECT COUNT(*) FROM files WHERE user_id = $1", user_id)
+        .fetch_one(&pool)
+        .await?
+        .count
+        .unwrap_or(0);
+
+    let rows = sqlx::query!(
+        "SELECT id, original_name, size_bytes, uploaded_at
+         FROM files
+         WHERE user_id = $1
+         ORDER BY uploaded_at DESC
+         LIMIT $2 OFFSET $3",
+        user_id,
+        limit,
+        offset
+    )
+    .fetch_all(&pool)
+    .await?;
+
+    let files = rows
+        .into_iter()
+        .map(|r| FileMetadata {
+            id: r.id,
+            original_name: r.original_name,
+            size_bytes: r.size_bytes,
+            uploaded_at: r.uploaded_at,
+        })
+        .collect();
+
+    Ok(Json(PaginatedFiles {
+        files,
+        page,
+        per_page,
+        total,
+    }))
 }

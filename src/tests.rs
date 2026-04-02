@@ -91,6 +91,34 @@ fn multipart_body(boundary: &str, filename: &str, content: &str) -> String {
     )
 }
 
+async fn upload_file_for_user(app: axum::Router, token: &str, filename: &str) -> String {
+    let boundary = "TestBoundary1234";
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/upload")
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .header(
+                    header::CONTENT_TYPE,
+                    format!("multipart/form-data; boundary={}", boundary),
+                )
+                .body(Body::from(multipart_body(boundary, filename, "content")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    std::str::from_utf8(&bytes)
+        .unwrap()
+        .strip_prefix("File ID: ")
+        .unwrap()
+        .trim()
+        .to_string()
+}
+
 // --- Tests ---
 
 #[tokio::test]
@@ -211,6 +239,145 @@ async fn test_upload_and_download() {
         .unwrap()
         .to_bytes();
     assert_eq!(downloaded.as_ref(), file_content.as_bytes());
+}
+
+#[tokio::test]
+async fn test_list_files_returns_own_files() {
+    tokio::fs::create_dir_all("./uploads").await.unwrap();
+    let pool = test_pool().await;
+    let alice_id = create_test_user(&pool, "alice", "password123").await;
+    let app = make_app(pool);
+    let token = make_jwt(alice_id, "alice");
+
+    upload_file_for_user(app.clone(), &token, "myfile.txt").await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/files")
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&bytes).unwrap();
+
+    assert_eq!(json["total"], 1);
+    assert_eq!(json["files"].as_array().unwrap().len(), 1);
+    assert_eq!(json["files"][0]["original_name"], "myfile.txt");
+}
+
+#[tokio::test]
+async fn test_list_files_excludes_other_users_files() {
+    tokio::fs::create_dir_all("./uploads").await.unwrap();
+    let pool = test_pool().await;
+    let alice_id = create_test_user(&pool, "alice", "password123").await;
+    let bob_id = create_test_user(&pool, "bob", "password456").await;
+    let app = make_app(pool);
+    let alice_token = make_jwt(alice_id, "alice");
+    let bob_token = make_jwt(bob_id, "bob");
+
+    upload_file_for_user(app.clone(), &alice_token, "alice.txt").await;
+    upload_file_for_user(app.clone(), &bob_token, "bob.txt").await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/files")
+                .header(header::AUTHORIZATION, format!("Bearer {}", alice_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&bytes).unwrap();
+
+    assert_eq!(json["total"], 1);
+    let files = json["files"].as_array().unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0]["original_name"], "alice.txt");
+}
+
+#[tokio::test]
+async fn test_list_files_pagination() {
+    tokio::fs::create_dir_all("./uploads").await.unwrap();
+    let pool = test_pool().await;
+    let alice_id = create_test_user(&pool, "alice", "password123").await;
+    let app = make_app(pool);
+    let token = make_jwt(alice_id, "alice");
+
+    for i in 0..3 {
+        upload_file_for_user(app.clone(), &token, &format!("file{}.txt", i)).await;
+    }
+
+    // Page 1: expect 2 results, total 3
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/files?page=1&per_page=2")
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&bytes).unwrap();
+
+    assert_eq!(json["total"], 3);
+    assert_eq!(json["per_page"], 2);
+    assert_eq!(json["files"].as_array().unwrap().len(), 2);
+
+    // Page 2: expect 1 result
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/files?page=2&per_page=2")
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&bytes).unwrap();
+
+    assert_eq!(json["files"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn test_list_files_requires_auth() {
+    let pool = test_pool().await;
+    let app = make_app(pool);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/files")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
