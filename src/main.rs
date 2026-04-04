@@ -11,6 +11,9 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
+use tower_http::trace::TraceLayer;
+use tracing::info;
+use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
 use crate::{auth::AuthUser, error::AppError};
@@ -72,6 +75,10 @@ pub struct PaginatedFiles {
 async fn main() {
     dotenvy::dotenv().ok();
 
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
+
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set in .env");
     let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set in .env");
 
@@ -89,7 +96,7 @@ async fn main() {
     let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
     let addr = format!("0.0.0.0:{}", port);
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    println!("Listening on port {}", port);
+    info!(port = port, "Server started");
 
     axum::serve(listener, app).await.unwrap();
 }
@@ -100,6 +107,7 @@ pub fn create_app(state: AppState) -> Router {
         .route("/files", get(list_files))
         .route("/files/{id}", get(download_file).delete(delete_file))
         .route("/auth/login", post(auth::login))
+        .layer(TraceLayer::new_for_http())
         .layer(DefaultBodyLimit::disable())
         .with_state(state)
 }
@@ -172,7 +180,7 @@ async fn upload_file(
         .execute(&pool)
         .await?;
 
-        println!("Saved '{}' as '{}'", file_name, id);
+        info!(file_name = %file_name, file_id = %id, user_id = user_id, "File uploaded");
 
         return Ok(format!("File ID: {}", id));
     }
