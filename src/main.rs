@@ -5,6 +5,9 @@ use sqlx::PgPool;
 use uuid::Uuid;
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use tokio_util::io::ReaderStream;
+use axum::body::Body;
+use tokio::io::AsyncWriteExt;
 
 use crate::{auth::AuthUser, error::AppError};
 
@@ -103,7 +106,7 @@ async fn upload_file(
     mut multipart: Multipart,
 ) -> Result<String, AppError> {
     let user_id = auth.0.user_id;
-    while let Some(field) = multipart
+    while let Some(mut field) = multipart
         .next_field()
         .await
         .map_err(|_| AppError::BadRequest)?
@@ -130,19 +133,30 @@ async fn upload_file(
             return Err(AppError::UnsupportedMediaType);
         }
 
-        let data = field.bytes().await.map_err(|_| AppError::BadRequest)?;
-
-        if data.len() > MAX_FILE_SIZE {
-            return Err(AppError::FileTooLarge);
-        }
-
-        let size = data.len() as i64;
         let id = Uuid::new_v4();
         let save_path = format!("{}/{}", UPLOAD_DIR, id);
 
-        tokio::fs::write(&save_path, &data)
+        let mut file = tokio::fs::File::create(&save_path)
             .await
             .map_err(|_| AppError::InternalError)?;
+
+        let mut total_size: usize = 0;
+
+        while let Some(chunk) = field.chunk().await.map_err(|_| AppError::BadRequest)? {
+            total_size += chunk.len();
+
+            if total_size > MAX_FILE_SIZE {
+                let _ = tokio::fs::remove_file(&save_path).await;
+                return Err(AppError::FileTooLarge);
+            }
+
+            if let Err(_) = file.write_all(&chunk).await {
+                let _ = tokio::fs::remove_file(&save_path).await;
+                return Err(AppError::InternalError);
+            }
+        }
+
+        let size = total_size as i64;
 
         sqlx::query!(
             "INSERT INTO files (id, original_name, size_bytes, user_id) VALUES ($1, $2, $3, $4)",
@@ -172,9 +186,13 @@ async fn download_file(
         .ok_or_else(|| AppError::NotFound(id.to_string()))?;
 
     let file_path = format!("{}/{}", UPLOAD_DIR, id);
-    let data = tokio::fs::read(&file_path)
+
+    let file = tokio::fs::File::open(&file_path)
         .await
         .map_err(|_| AppError::NotFound(id.to_string()))?;
+
+    let stream = ReaderStream::new(file);
+    let body = Body::from_stream(stream);
 
     let headers = [
         (header::CONTENT_TYPE, "application/octet-stream".to_string()),
@@ -184,7 +202,7 @@ async fn download_file(
         ),
     ];
 
-    Ok((headers, data))
+    Ok((headers, body))
 }
 
 async fn delete_file(

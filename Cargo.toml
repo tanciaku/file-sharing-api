@@ -17,6 +17,7 @@ dotenvy = "0.15.7"
 chrono = { version = "0.4.44", features = ["serde"] }
 argon2 = "0.5.3"
 jsonwebtoken = { version = "10.3.0", features = ["rust_crypto"] }
+tokio-util = { version = "0.7.18", features = ["io"] }
 
 [dev-dependencies]
 http-body-util = "0.1.3"
