@@ -1,13 +1,17 @@
-use axum::{
-    Json, Router, extract::{DefaultBodyLimit, FromRef, Multipart, Path, Query, State}, http::{StatusCode, header}, response::IntoResponse, routing::{get, post}
-};
-use sqlx::PgPool;
-use uuid::Uuid;
-use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc};
-use tokio_util::io::ReaderStream;
 use axum::body::Body;
+use axum::{
+    Json, Router,
+    extract::{DefaultBodyLimit, FromRef, Multipart, Path, Query, State},
+    http::{StatusCode, header},
+    response::IntoResponse,
+    routing::{get, post},
+};
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
 use tokio::io::AsyncWriteExt;
+use tokio_util::io::ReaderStream;
+use uuid::Uuid;
 
 use crate::{auth::AuthUser, error::AppError};
 
@@ -127,7 +131,7 @@ async fn upload_file(
         if !ALLOWED_EXTENSIONS.contains(&ext.as_str()) {
             return Err(AppError::UnsupportedMediaType);
         }
-        
+
         let content_type = field.content_type().unwrap_or("").to_string();
         if !ALLOWED_MIME_TYPES.contains(&content_type.as_str()) {
             return Err(AppError::UnsupportedMediaType);

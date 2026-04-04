@@ -104,7 +104,12 @@ async fn upload_file_for_user(app: axum::Router, token: &str, filename: &str) ->
                     header::CONTENT_TYPE,
                     format!("multipart/form-data; boundary={}", boundary),
                 )
-                .body(Body::from(multipart_body(boundary, filename, "text/plain", "content")))
+                .body(Body::from(multipart_body(
+                    boundary,
+                    filename,
+                    "text/plain",
+                    "content",
+                )))
                 .unwrap(),
         )
         .await
@@ -141,7 +146,12 @@ async fn test_upload_rejects_disallowed_extension() {
                     header::CONTENT_TYPE,
                     format!("multipart/form-data; boundary={}", boundary),
                 )
-                .body(Body::from(multipart_body(boundary, "malware.exe", "text/plain", "bad")))
+                .body(Body::from(multipart_body(
+                    boundary,
+                    "malware.exe",
+                    "text/plain",
+                    "bad",
+                )))
                 .unwrap(),
         )
         .await
@@ -169,7 +179,12 @@ async fn test_upload_rejects_disallowed_mime_type() {
                     header::CONTENT_TYPE,
                     format!("multipart/form-data; boundary={}", boundary),
                 )
-                .body(Body::from(multipart_body(boundary, "file.txt", "application/octet-stream", "bad")))
+                .body(Body::from(multipart_body(
+                    boundary,
+                    "file.txt",
+                    "application/octet-stream",
+                    "bad",
+                )))
                 .unwrap(),
         )
         .await
@@ -198,7 +213,12 @@ async fn test_upload_rejects_oversized_file() {
                     header::CONTENT_TYPE,
                     format!("multipart/form-data; boundary={}", boundary),
                 )
-                .body(Body::from(multipart_body(boundary, "big.txt", "text/plain", &big_content)))
+                .body(Body::from(multipart_body(
+                    boundary,
+                    "big.txt",
+                    "text/plain",
+                    &big_content,
+                )))
                 .unwrap(),
         )
         .await
@@ -206,7 +226,6 @@ async fn test_upload_rejects_oversized_file() {
 
     assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
 }
-
 
 #[tokio::test]
 async fn test_login_success() {
@@ -492,7 +511,12 @@ async fn test_delete_owner_vs_non_owner() {
                     header::CONTENT_TYPE,
                     format!("multipart/form-data; boundary={}", boundary),
                 )
-                .body(Body::from(multipart_body(boundary, "alice.txt", "text/plain", "hello")))
+                .body(Body::from(multipart_body(
+                    boundary,
+                    "alice.txt",
+                    "text/plain",
+                    "hello",
+                )))
                 .unwrap(),
         )
         .await
