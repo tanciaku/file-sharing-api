@@ -71,6 +71,13 @@ pub struct PaginatedFiles {
     pub total: i64,
 }
 
+#[derive(Serialize)]
+pub struct ShareTokenResponse {
+    pub token: Uuid,
+    pub expires_at: DateTime<Utc>,
+    pub download_url: String,
+}
+
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
@@ -106,6 +113,8 @@ pub fn create_app(state: AppState) -> Router {
         .route("/upload", post(upload_file))
         .route("/files", get(list_files))
         .route("/files/{id}", get(download_file).delete(delete_file))
+        .route("/files/{id}/share", post(create_share_token))
+        .route("/files/shared/{token}", get(download_shared_file))
         .route("/auth/login", post(auth::login))
         .layer(TraceLayer::new_for_http())
         .layer(DefaultBodyLimit::disable())
@@ -296,4 +305,80 @@ async fn list_files(
         per_page,
         total,
     }))
+}
+
+async fn create_share_token(
+    State(pool): State<PgPool>,
+    Path(id): Path<Uuid>,
+    auth: AuthUser,
+) -> Result<Json<ShareTokenResponse>, AppError> {
+    let user_id = auth.0.user_id;
+
+    let record = sqlx::query!("SELECT user_id FROM files WHERE id = $1", id)
+        .fetch_optional(&pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound(id.to_string()))?;
+
+    if record.user_id != user_id {
+        return Err(AppError::Forbidden);
+    }
+
+    let token = Uuid::new_v4();
+    let expires_at = Utc::now()
+        .checked_add_signed(chrono::Duration::hours(24))
+        .unwrap();
+
+    sqlx::query!(
+        "INSERT INTO share_tokens (token, file_id, expires_at) VALUES ($1, $2, $3)",
+        token,
+        id,
+        expires_at,
+    )
+    .execute(&pool)
+    .await?;
+
+    Ok(Json(ShareTokenResponse {
+        token,
+        expires_at,
+        download_url: format!("/files/shared/{}", token),
+    }))
+}
+
+async fn download_shared_file(
+    State(pool): State<PgPool>,
+    Path(token): Path<Uuid>,
+) -> Result<impl IntoResponse, AppError> {
+    let record = sqlx::query!(
+        "SELECT f.id AS file_id, f.original_name, st.expires_at
+         FROM share_tokens st
+         JOIN files f ON f.id = st.file_id
+         WHERE st.token = $1",
+        token
+    )
+    .fetch_optional(&pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound(token.to_string()))?;
+
+    if record.expires_at < Utc::now() {
+        return Err(AppError::Gone);
+    }
+
+    let file_path = format!("{}/{}", UPLOAD_DIR, record.file_id);
+
+    let file = tokio::fs::File::open(&file_path)
+        .await
+        .map_err(|_| AppError::InternalError)?;
+
+    let stream = ReaderStream::new(file);
+    let body = Body::from_stream(stream);
+
+    let headers = [
+        (header::CONTENT_TYPE, "application/octet-stream".to_string()),
+        (
+            header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"{}\"", record.original_name),
+        ),
+    ];
+
+    Ok((headers, body))
 }

@@ -10,6 +10,7 @@ pub enum AppError {
     Forbidden,
     FileTooLarge,
     UnsupportedMediaType,
+    Gone,
 }
 
 impl IntoResponse for AppError {
@@ -48,6 +49,9 @@ impl IntoResponse for AppError {
                 "File type is not allowed".to_string(),
             )
                 .into_response(),
+            AppError::Gone => {
+                (StatusCode::GONE, "This share link has expired".to_string()).into_response()
+            }
         }
     }
 }

@@ -1,0 +1,7 @@
+CREATE TABLE share_tokens (
+    token UUID PRIMARY KEY,
+    file_id UUID NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)
+
