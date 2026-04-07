@@ -111,6 +111,7 @@ async fn main() {
 
 pub fn create_app(state: AppState) -> Router {
     Router::new()
+        .route("/health", get(|| async { "OK" }))
         .route("/upload", post(upload_file))
         .route("/files", get(list_files))
         .route("/files/{id}", get(download_file).delete(delete_file))
