@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, original_name, size_bytes, uploaded_at\n         FROM files\n         WHERE user_id = $1\n         ORDER BY uploaded_at DESC\n         LIMIT $2 OFFSET $3",
+  "query": "SELECT id, original_name, size_bytes, uploaded_at, download_count\n         FROM files\n         WHERE user_id = $1\n         ORDER BY uploaded_at DESC\n         LIMIT $2 OFFSET $3",
   "describe": {
     "columns": [
       {
@@ -22,6 +22,11 @@
         "ordinal": 3,
         "name": "uploaded_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "download_count",
+        "type_info": "Int8"
       }
     ],
     "parameters": {
@@ -35,8 +40,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "657590a232c582fd9c461fdbfcb994752844424470802eac09b3ce59edf55db3"
+  "hash": "501e19280f74f3809780464f8967660a77025d68dfbe8f3086ad2ae77e012cd6"
 }

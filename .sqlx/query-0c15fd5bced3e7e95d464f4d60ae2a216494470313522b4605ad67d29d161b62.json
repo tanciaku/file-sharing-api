@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT original_name FROM files WHERE id = $1",
+  "query": "UPDATE files SET download_count = download_count + 1 WHERE id = $1 RETURNING original_name",
   "describe": {
     "columns": [
       {
@@ -18,5 +18,5 @@
       false
     ]
   },
-  "hash": "3c6d1c4e3e0ed096351b2dafaf0ce047189093c7b520ca9df417829bbbd7ac17"
+  "hash": "0c15fd5bced3e7e95d464f4d60ae2a216494470313522b4605ad67d29d161b62"
 }
