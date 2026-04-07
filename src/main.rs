@@ -55,6 +55,7 @@ pub struct FileMetadata {
     pub original_name: String,
     pub size_bytes: i64,
     pub uploaded_at: DateTime<Utc>,
+    pub download_count: i64,
 }
 
 #[derive(Deserialize)]
@@ -113,6 +114,7 @@ pub fn create_app(state: AppState) -> Router {
         .route("/upload", post(upload_file))
         .route("/files", get(list_files))
         .route("/files/{id}", get(download_file).delete(delete_file))
+        .route("/files/{id}/meta", get(get_file_meta))
         .route("/files/{id}/share", post(create_share_token))
         .route("/files/shared/{token}", get(download_shared_file))
         .route("/auth/login", post(auth::login))
@@ -201,10 +203,13 @@ async fn download_file(
     State(pool): State<PgPool>,
     Path(id): Path<Uuid>,
 ) -> Result<impl IntoResponse, AppError> {
-    let record = sqlx::query!("SELECT original_name FROM files WHERE id = $1", id)
-        .fetch_optional(&pool)
-        .await?
-        .ok_or_else(|| AppError::NotFound(id.to_string()))?;
+    let record = sqlx::query!(
+        "UPDATE files SET download_count = download_count + 1 WHERE id = $1 RETURNING original_name",
+        id
+    )
+    .fetch_optional(&pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound(id.to_string()))?;
 
     let file_path = format!("{}/{}", UPLOAD_DIR, id);
 
@@ -277,7 +282,7 @@ async fn list_files(
         .unwrap_or(0);
 
     let rows = sqlx::query!(
-        "SELECT id, original_name, size_bytes, uploaded_at
+        "SELECT id, original_name, size_bytes, uploaded_at, download_count
          FROM files
          WHERE user_id = $1
          ORDER BY uploaded_at DESC
@@ -296,6 +301,7 @@ async fn list_files(
             original_name: r.original_name,
             size_bytes: r.size_bytes,
             uploaded_at: r.uploaded_at,
+            download_count: r.download_count,
         })
         .collect();
 
@@ -363,6 +369,13 @@ async fn download_shared_file(
         return Err(AppError::Gone);
     }
 
+    sqlx::query!(
+        "UPDATE files SET download_count = download_count + 1 WHERE id = $1",
+        record.file_id
+    )
+    .execute(&pool)
+    .await?;
+
     let file_path = format!("{}/{}", UPLOAD_DIR, record.file_id);
 
     let file = tokio::fs::File::open(&file_path)
@@ -381,4 +394,31 @@ async fn download_shared_file(
     ];
 
     Ok((headers, body))
+}
+
+async fn get_file_meta(
+    State(pool): State<PgPool>,
+    Path(id): Path<Uuid>,
+    auth: AuthUser,
+) -> Result<Json<FileMetadata>, AppError> {
+    let user_id = auth.0.user_id;
+
+    let record = sqlx::query!(
+        "SELECT id, original_name, size_bytes, uploaded_at, download_count
+         FROM files
+         WHERE id = $1 AND user_id = $2",
+        id,
+        user_id
+    )
+    .fetch_optional(&pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound(id.to_string()))?;
+
+    Ok(Json(FileMetadata {
+        id: record.id,
+        original_name: record.original_name,
+        size_bytes: record.size_bytes,
+        uploaded_at: record.uploaded_at,
+        download_count: record.download_count,
+    }))
 }

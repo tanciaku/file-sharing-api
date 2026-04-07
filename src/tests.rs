@@ -703,6 +703,173 @@ async fn test_download_shared_file() {
 }
 
 #[tokio::test]
+async fn test_get_file_meta() {
+    tokio::fs::create_dir_all("./uploads").await.unwrap();
+    let pool = test_pool().await;
+    let alice_id = create_test_user(&pool, "alice", "password123").await;
+    let app = make_app(pool);
+    let token = make_jwt(alice_id, "alice");
+
+    let file_id = upload_file_for_user(app.clone(), &token, "meta.txt").await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/files/{}/meta", file_id))
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&bytes).unwrap();
+
+    assert_eq!(json["original_name"], "meta.txt");
+    assert_eq!(json["download_count"], 0);
+    assert!(json["size_bytes"].as_i64().unwrap() > 0);
+}
+
+#[tokio::test]
+async fn test_get_file_meta_requires_auth() {
+    tokio::fs::create_dir_all("./uploads").await.unwrap();
+    let pool = test_pool().await;
+    let alice_id = create_test_user(&pool, "alice", "password123").await;
+    let app = make_app(pool);
+    let token = make_jwt(alice_id, "alice");
+
+    let file_id = upload_file_for_user(app.clone(), &token, "meta.txt").await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/files/{}/meta", file_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn test_get_file_meta_not_found_for_other_user() {
+    tokio::fs::create_dir_all("./uploads").await.unwrap();
+    let pool = test_pool().await;
+    let alice_id = create_test_user(&pool, "alice", "password123").await;
+    let bob_id = create_test_user(&pool, "bob", "password456").await;
+    let app = make_app(pool);
+    let alice_token = make_jwt(alice_id, "alice");
+    let bob_token = make_jwt(bob_id, "bob");
+
+    let file_id = upload_file_for_user(app.clone(), &alice_token, "alice.txt").await;
+
+    // Bob requests metadata for Alice's file → 404
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/files/{}/meta", file_id))
+                .header(header::AUTHORIZATION, format!("Bearer {}", bob_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_download_increments_download_count() {
+    tokio::fs::create_dir_all("./uploads").await.unwrap();
+    let pool = test_pool().await;
+    let alice_id = create_test_user(&pool, "alice", "password123").await;
+    let app = make_app(pool);
+    let token = make_jwt(alice_id, "alice");
+
+    let file_id = upload_file_for_user(app.clone(), &token, "counted.txt").await;
+
+    // Download the file directly
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/files/{}", file_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Check download_count via meta endpoint
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/files/{}/meta", file_id))
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(json["download_count"], 1);
+}
+
+#[tokio::test]
+async fn test_shared_download_increments_download_count() {
+    tokio::fs::create_dir_all("./uploads").await.unwrap();
+    let pool = test_pool().await;
+    let alice_id = create_test_user(&pool, "alice", "password123").await;
+    let app = make_app(pool);
+    let token = make_jwt(alice_id, "alice");
+
+    let file_id = upload_file_for_user(app.clone(), &token, "shared_counted.txt").await;
+    let share_json = create_share_token_for_file(app.clone(), &token, &file_id).await;
+    let download_url = share_json["download_url"].as_str().unwrap().to_string();
+
+    // Download via shared URL
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(&download_url)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Check download_count via meta endpoint
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/files/{}/meta", file_id))
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(json["download_count"], 1);
+}
+
+#[tokio::test]
 async fn test_download_shared_file_expired() {
     tokio::fs::create_dir_all("./uploads").await.unwrap();
     let pool = test_pool().await;
