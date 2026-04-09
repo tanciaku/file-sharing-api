@@ -1,0 +1,48 @@
+name: CD
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --no-default-features --features postgres
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p 2222 ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Copy binary to VPS
+        run: |
+          scp -i ~/.ssh/deploy_key -P 2222 \
+            target/release/file-sharing-api \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:~
+
+      - name: Run migrations and restart service
+        run: |
+          ssh -i ~/.ssh/deploy_key -p 2222 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
+            export DATABASE_URL="${{ secrets.DATABASE_URL }}"
+            sqlx migrate run
+            sudo mv ~/file-sharing-api /usr/local/bin/file-sharing-api
+            sudo chmod +x /usr/local/bin/file-sharing-api
+            sudo systemctl restart file-sharing-api
+          EOF
