@@ -10,9 +10,7 @@ jobs:
   deploy:
     if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    environment:
-      name: production
-      url: ${{ secrets.DEPLOY_URL }}
+    environment: production
 
     steps:
       - name: Checkout
