@@ -79,6 +79,12 @@ pub struct ShareTokenResponse {
     pub download_url: String,
 }
 
+#[derive(Serialize)]
+pub struct HealthResponse {
+    pub status: &'static str,
+    pub version: &'static str,
+}
+
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
@@ -111,7 +117,7 @@ async fn main() {
 
 pub fn create_app(state: AppState) -> Router {
     Router::new()
-        .route("/health", get(|| async { "OK" }))
+        .route("/health", get(health))
         .route("/upload", post(upload_file))
         .route("/files", get(list_files))
         .route("/files/{id}", get(download_file).delete(delete_file))
@@ -122,6 +128,13 @@ pub fn create_app(state: AppState) -> Router {
         .layer(TraceLayer::new_for_http())
         .layer(DefaultBodyLimit::disable())
         .with_state(state)
+}
+
+async fn health() -> Json<HealthResponse> {
+    Json(HealthResponse {
+        status: "ok",
+        version: env!("CARGO_PKG_VERSION"),
+    })
 }
 
 async fn upload_file(
