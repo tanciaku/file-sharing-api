@@ -2,6 +2,41 @@
 
 A REST API for uploading, managing, and sharing files, built with Rust and Axum.
 
+## Deployment
+
+**Live at [files.tanciaku.com](https://files.tanciaku.com)**
+
+```bash
+# Health check
+curl https://files.tanciaku.com/health
+```
+
+The API is self-hosted on a Debian VPS, manually configured from scratch.
+
+### Stack
+
+| Layer | Technology |
+|---|---|
+| Language | Rust (Axum) |
+| Database | PostgreSQL (sqlx, auto-migrations on startup) |
+| Web server | Nginx (reverse proxy, rate limiting) |
+| TLS | Let's Encrypt — A+ rated |
+| OS | Debian 13 (VPS) |
+| CI/CD | GitHub Actions — builds release binary, runs migrations, deploys on push to `main` |
+
+### Security highlights
+
+- SSH: key-only authentication, non-standard port, root login disabled
+- Firewall: UFW — only ports 80, 443, and SSH exposed
+- Intrusion prevention: Fail2ban watching SSH and Nginx (auth brute force, 4xx scanning, rate limit violations)
+- Rate limiting: Nginx `limit_req_zone` on upload, download, and auth endpoints
+- Security headers: A+ rated (HSTS, CSP, X-Frame-Options, etc.)
+- Database: PostgreSQL bound to localhost only, least-privilege app user
+- App process: runs as a dedicated system user with no login shell
+- Secrets: managed via a root-only environment file, not in the service unit
+
+---
+
 ## Features
 
 - Upload files with server-side validation (type and size)
